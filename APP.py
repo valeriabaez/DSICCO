@@ -1,313 +1,232 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import os
-from io import BytesIO
 
-# ---------------------------------------------------------
-# CONFIGURACIÓN
-# ---------------------------------------------------------
-st.set_page_config(page_title="DSICCO – Resúmenes A 2025", layout="wide", page_icon="escudo.png")
+# -------------------------------------------------
+# CONFIGURACIÓN DE PÁGINA
+# -------------------------------------------------
+st.set_page_config(
+    page_title="DSICCO – Tablero de Control",
+    page_icon="🛡️ DSICCO",
+    layout="wide"
+)
 
-st.markdown("""
-<div style='text-align:center; background-color:#003366; padding:15px; border-radius:10px;'>
-    <h1 style='color:white;'>🛡️ DSICCO – Carga y Resúmenes 2025</h1>
-    <p style='color:white;'>Subí tu archivo DSICCO.xlsx con las hojas ALLANAMIENTOS y ARMAS</p>
-</div>
-""", unsafe_allow_html=True)
+# -------------------------------------------------
+# SIDEBAR – MENÚ LATERAL
+# -------------------------------------------------
+st.sidebar.title("🛡️ DSICCO")
 
+# Usamos session_state para navegación
+if "pagina" not in st.session_state:
+    st.session_state["pagina"] = "tablero"
 
-# ---------------------------------------------------------
-# CARPETA UPLOADS
-# ---------------------------------------------------------
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-SAVED_FILE = os.path.join(UPLOAD_FOLDER, "DSICCO.xlsx")
-
-# ---------------------------------------------------------
-# FUNCIONES AUXILIARES
-# ---------------------------------------------------------
-def nombre_mes(num):
-    meses = [
-        "SIN MES","ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO",
-        "JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"
+opcion = st.sidebar.radio(
+    "Menú",
+    [
+        "🏠 Tablero Principal",
+        "📊 Allanamientos y Armas",
+        "🚓 Móviles DSICCO",
+        "🛠️ Taller Mecánico",
+        "⚙️ Configuración"
     ]
-    try:
-        n = int(num)
-        return meses[n] if 1 <= n <= 12 else "SIN MES"
-    except:
-        return "SIN MES"
-
-def cargar_excel(path):
-    return pd.read_excel(path, sheet_name=None)
-
-
-def build_blocks(df, mes_col, mes_name_col, unidad_col="UNIDAD", interv_col="INTERVENCION", cant_col="CANTIDAD"):
-    blocks = []
-    total_general = 0
-    for mes in sorted(df[mes_col].unique()):
-        df_mes = df[df[mes_col] == mes]
-        if df_mes.empty:
-            continue
-
-        mes_label = df_mes[mes_name_col].iloc[0]
-        blocks.append([mes_label, "", "", ""])
-
-        for _, r in df_mes.iterrows():
-            blocks.append([
-                "",
-                r.get(unidad_col, ""),
-                r.get(interv_col, "ALLANAMIENTO") if interv_col else "ALLANAMIENTO",
-                int(r.get(cant_col, 0))
-            ])
-
-        subtotal = int(df_mes[cant_col].sum())
-        blocks.append(["Subtotal", "", "", subtotal])
-        total_general += subtotal
-
-    blocks.append(["TOTAL GENERAL", "", "", total_general])
-    return blocks
-
-
-# ---------------------------------------------------------
-# EXPORTACIÓN A EXCEL CON CELDAS COMBINADAS
-# ---------------------------------------------------------
-def export_excel(blocks_allan, blocks_armas):
-    import openpyxl
-
-    output = BytesIO()
-
-    df_allan = pd.DataFrame(blocks_allan, columns=["Mes", "Unidad", "Intervención", "Cantidad"])
-    df_armas = pd.DataFrame(blocks_armas, columns=["Mes", "Unidad", "Intervención", "Cantidad"])
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_allan.to_excel(writer, sheet_name="ALLANAMIENTOS", index=False)
-        df_armas.to_excel(writer, sheet_name="ARMAS", index=False)
-
-        # --------------------- ALLANAMIENTOS ------------------------
-        ws = writer.book["ALLANAMIENTOS"]
-        merge_start = None
-        last_mes = None
-
-        for row in range(2, ws.max_row + 1):
-            val = ws[f"A{row}"].value
-
-            if val not in ["", None, "Subtotal", "TOTAL GENERAL"]:
-                if merge_start is not None:
-                    ws.merge_cells(f"A{merge_start}:A{row-1}")
-                merge_start = row
-                last_mes = val
-
-            if val == "Subtotal":
-                if merge_start:
-                    ws.merge_cells(f"A{merge_start}:A{row-1}")
-                merge_start = None
-                last_mes = None
-
-        if merge_start:
-            ws.merge_cells(f"A{merge_start}:A{ws.max_row}")
-
-        # --------------------- ARMAS ------------------------
-        ws2 = writer.book["ARMAS"]
-        merge_start = None
-        last_mes = None
-
-        for row in range(2, ws2.max_row + 1):
-            val = ws2[f"A{row}"].value
-
-            if val not in ["", None, "Subtotal", "TOTAL GENERAL"]:
-                if merge_start:
-                    ws2.merge_cells(f"A{merge_start}:A{row-1}")
-                merge_start = row
-                last_mes = val
-
-            if val == "Subtotal":
-                if merge_start:
-                    ws2.merge_cells(f"A{merge_start}:A{row-1}")
-                merge_start = None
-                last_mes = None
-
-        if merge_start:
-            ws2.merge_cells(f"A{merge_start}:A{ws2.max_row}")
-
-    return output.getvalue()
-
-
-# ---------------------------------------------------------
-# SUBIR ARCHIVO NUEVO
-# ---------------------------------------------------------
-uploaded = st.file_uploader("📂 Seleccioná archivo Excel", type=["xlsx"])
-
-if uploaded:
-    with open(SAVED_FILE, "wb") as f:
-        f.write(uploaded.getvalue())
-    st.success("✔ Archivo cargado y reemplazado correctamente.")
-
-# ---------------------------------------------------------
-# CARGAR ARCHIVO EXISTENTE
-# ---------------------------------------------------------
-if not os.path.exists(SAVED_FILE):
-    st.warning("📁 Todavía no hay archivo cargado.")
-    st.stop()
-
-try:
-    excel = cargar_excel(SAVED_FILE)
-except Exception as e:
-    st.error(f"❌ Error al abrir el archivo guardado: {e}")
-    st.stop()
-
-if "ALLANAMIENTOS" not in excel or "ARMAS" not in excel:
-    st.error("❌ El archivo debe contener ALLANAMIENTOS y ARMAS.")
-    st.stop()
-
-allan = excel["ALLANAMIENTOS"].copy()
-allan.columns = allan.columns.str.upper().str.strip()
-
-armas = excel["ARMAS"].copy()
-armas.columns = armas.columns.str.upper().str.strip()
-
-# ---------------------------------------------------------
-# PROCESAR ALLANAMIENTOS
-# ---------------------------------------------------------
-st.markdown("## 🔵 ALLANAMIENTOS")
-
-if "FECHA" not in allan.columns:
-    st.error("❌ ALLANAMIENTOS debe tener FECHA.")
-    st.stop()
-
-allan["FECHA"] = pd.to_datetime(allan["FECHA"], errors="coerce")
-allan["MES"] = allan["FECHA"].dt.month.fillna(0).astype(int)
-allan["MES_NOMBRE"] = allan["MES"].apply(nombre_mes)
-allan["POSITIVO_FLAG"] = allan["RESULTADO"].astype(str).str.upper().str.contains("POS", na=False)
-allan["NEGATIVO_FLAG"] = allan["RESULTADO"].astype(str).str.upper().str.contains("NEG", na=False)
-allan["CANTIDAD"] = 1
-
-resumen_allan = (
-    allan.groupby(["MES", "MES_NOMBRE", "UNIDAD"], as_index=False)
-    .agg({"POSITIVO_FLAG": "sum", "NEGATIVO_FLAG": "sum", "CANTIDAD": "sum"})
 )
 
-blocks_allan = build_blocks(
-    resumen_allan,
-    "MES",
-    "MES_NOMBRE",
-    unidad_col="UNIDAD",
-    interv_col=None,
-    cant_col="CANTIDAD"
-)
 
-for mes in sorted(resumen_allan["MES"].unique()):
-    df_mes = resumen_allan[resumen_allan["MES"] == mes]
+# Actualizamos página según selección
+if opcion == "🏠 Tablero Principal":
+    st.session_state["pagina"] = "tablero"
+elif opcion == "📊 Allanamientos y Armas":
+    st.session_state["pagina"] = "allanamientos"
+elif opcion == "🚓 Móviles DSICCO":
+    st.session_state["pagina"] = "moviles"
+elif opcion == "🛠️ Taller Mecánico":
+    st.session_state["pagina"] = "taller"
+elif opcion == "⚙️ Configuración":
+    st.session_state["pagina"] = "configuracion"
 
-    with st.expander(f"📅 {df_mes['MES_NOMBRE'].iloc[0]}"):
 
-        # 🔥 Solo mostramos UNIDAD – POS – NEG – TOTAL (sin repetir MES)
-        tabla = df_mes[["UNIDAD", "POSITIVO_FLAG", "NEGATIVO_FLAG", "CANTIDAD"]].rename(columns={
-            "UNIDAD": "Unidad",
-            "POSITIVO_FLAG": "Positivos",
-            "NEGATIVO_FLAG": "Negativos",
-            "CANTIDAD": "Total"
-        })
+# -------------------------------------------------
+# TABLERO PRINCIPAL
+# -------------------------------------------------
+if st.session_state["pagina"] == "tablero":
+    st.title("🛡️ DSICCO – Tablero de Control")
+    st.caption("Dirección de Seguridad Interior Cutral Co")
+    st.divider()
 
-        st.table(tabla)
+    # ----------------- ARCHIVOS EXISTENTES -----------------
+    UPLOAD_FOLDER = "uploads"
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    EXCEL_FILE = os.path.join(UPLOAD_FOLDER, "DSICCO.xlsx")
+    MOVILES_FILE = os.path.join(UPLOAD_FOLDER, "MOVILES.xlsx")
 
-        st.markdown(f"**Subtotal:** {df_mes['CANTIDAD'].sum()}")
+    if not os.path.exists(EXCEL_FILE):
+        st.warning("📁 DSICCO.xlsx no encontrado en 'uploads'.")
+    if not os.path.exists(MOVILES_FILE):
+        st.warning("📁 MOVILES.xlsx no encontrado en 'uploads'.")
 
-# ---------------------------------------------------------
-# TOTALES DE ALLANAMIENTOS (debajo de los expanders)
-# ---------------------------------------------------------
+    # ----------------- CARGAR DATOS -----------------
+    allan = pd.DataFrame()
+    armas = pd.DataFrame()
+    flota = pd.DataFrame()
+    motos = pd.DataFrame()
 
-total_positivos = int(allan["POSITIVO_FLAG"].sum())
-total_negativos = int(allan["NEGATIVO_FLAG"].sum())
-total_allanamientos = int(allan["CANTIDAD"].sum())
+    if os.path.exists(EXCEL_FILE):
+        try:
+            excel_data = pd.read_excel(EXCEL_FILE, sheet_name=None)
+            if "ALLANAMIENTOS" in excel_data:
+                allan = excel_data["ALLANAMIENTOS"].copy()
+                allan.columns = allan.columns.str.upper().str.strip()
+            if "ARMAS" in excel_data:
+                armas = excel_data["ARMAS"].copy()
+                armas.columns = armas.columns.str.upper().str.strip()
+        except:
+            st.warning("No se pudo leer DSICCO.xlsx")
 
-st.write("### Total Positivos")
-st.markdown(f"<h2 style='margin-top:-10px;'>{total_positivos}</h2>", unsafe_allow_html=True)
+    if os.path.exists(MOVILES_FILE):
+        try:
+            excel_m = pd.read_excel(MOVILES_FILE, sheet_name=None)
+            for h in excel_m.keys():
+                key_upper = h.upper()
+                df = excel_m[h].copy()
+                df.columns = df.columns.str.upper().str.strip()
+                for col in df.columns:
+                    df[col] = df[col].astype(str).str.upper().str.strip()
+                if "FLOTA" in key_upper:
+                    flota = df
+                    if "UNIDAD" not in flota.columns:
+                        flota["UNIDAD"] = "SIN UNIDAD"
+                elif "MOTO" in key_upper:
+                    motos = df
+                    if "UNIDAD" not in motos.columns:
+                        if "DESTINO" in motos.columns:
+                            motos["UNIDAD"] = motos["DESTINO"].replace({"": "SIN UNIDAD"}).fillna("SIN UNIDAD")
+                        else:
+                            motos["UNIDAD"] = "SIN UNIDAD"
+        except:
+            st.warning("No se pudo leer MOVILES.xlsx")
 
-st.write("### Total Negativos")
-st.markdown(f"<h2 style='margin-top:-10px;'>{total_negativos}</h2>", unsafe_allow_html=True)
+    # ----------------- CALCULO KPIs -----------------
+    if not allan.empty:
+        allan["RESULTADO"] = allan["RESULTADO"].astype(str).str.upper()
+        allan_positivos = int(allan["RESULTADO"].str.contains("POS").sum())
+        allan_negativos = int(allan["RESULTADO"].str.contains("NEG").sum())
+    else:
+        allan_positivos = 0
+        allan_negativos = 0
 
-st.write("### TOTAL Allanamientos")
-st.markdown(f"<h2 style='margin-top:-10px;'>{total_allanamientos}</h2>", unsafe_allow_html=True)
+    if not armas.empty:
+        armas_fuego = armas[armas["TIPO"].astype(str).str.upper().str.contains("ARMA|TUMBERA", regex=True, na=False)]
+        cartucheria = armas[armas["TIPO"].astype(str).str.upper().str.contains("CARTUCHERIA", regex=True, na=False)]
+        armas_secuestradas = int(armas_fuego["CANTIDAD"].sum())
+        cartucheria_secuestrada = int(cartucheria["CANTIDAD"].sum())
+    else:
+        armas_secuestradas = 0
+        cartucheria_secuestrada = 0
 
-# ---------------------------------------------------------
-# ARMAS
-# ---------------------------------------------------------
-st.markdown("## 🔴 ARMAS")
+    # ----------------- MOSTRAR KPIs -----------------
+    st.subheader("📊 Resumen Principal")
+    c1, c2, c3, c4 = st.columns(4)
 
-required = ["FECHA", "TIPO", "INTERVENCION", "CANTIDAD"]
-for col in required:
-    if col not in armas.columns:
-        st.error(f"❌ La hoja ARMAS debe tener {col}.")
-        st.stop()
+    if c1.button(f"✅ Allanamientos Positivos: {allan_positivos}"):
+        st.session_state["pagina"] = "allanamientos"
+        st.experimental_rerun()
 
-armas["FECHA"] = pd.to_datetime(armas["FECHA"], errors="coerce")
-armas["MES"] = armas["FECHA"].dt.month.fillna(0).astype(int)
-armas["MES_NOMBRE"] = armas["MES"].apply(nombre_mes)
+    if c2.button(f"❌ Allanamientos Negativos: {allan_negativos}"):
+        st.session_state["pagina"] = "allanamientos"
+        st.experimental_rerun()
 
-armas_validas = armas[
-    armas["TIPO"].astype(str).str.upper().str.contains("ARMA|TUMBERA", regex=True, na=False)
-].copy()
+    if c3.button(f"🔫 Armas Secuestradas: {armas_secuestradas}"):
+        st.session_state["pagina"] = "allanamientos"
+        st.experimental_rerun()
 
-armas_validas["CANTIDAD"] = (
-    pd.to_numeric(armas_validas["CANTIDAD"], errors="coerce")
-    .fillna(1)
-    .astype(int)
-)
+    if c4.button(f"🧰 Cartuchería Secuestrada: {cartucheria_secuestrada}"):
+        st.session_state["pagina"] = "allanamientos"
+        st.experimental_rerun()
 
-resumen_armas = (
-    armas_validas.groupby(["MES", "MES_NOMBRE", "UNIDAD", "INTERVENCION"], as_index=False)
-    .agg({"CANTIDAD": "sum"})
-)
+    st.divider()
+    st.subheader("🚓 Estado de Móviles y Motocicletas")
 
-blocks_armas = build_blocks(
-    resumen_armas,
-    "MES",
-    "MES_NOMBRE",
-    unidad_col="UNIDAD",
-    interv_col="INTERVENCION",
-    cant_col="CANTIDAD"
-)
+    def resumen_estado(df):
+        if "SITUACION ACTUAL" in df.columns:
+            df["SITUACION ACTUAL"] = df["SITUACION ACTUAL"].str.upper().str.strip()
+            en_servicio = df[df["SITUACION ACTUAL"]=="EN SERVICIO"].shape[0]
+            fuera_servicio = df[df["SITUACION ACTUAL"]=="FUERA DE SERVICIO"].shape[0]
+            return en_servicio, fuera_servicio
+        return 0,0
 
-for mes in sorted(resumen_armas["MES"].unique()):
-    df_mes = resumen_armas[resumen_armas["MES"] == mes]
-    with st.expander(f"📅 {df_mes['MES_NOMBRE'].iloc[0]}"):
-        st.table(df_mes)
+    moviles_en, moviles_fuera = resumen_estado(flota)
+    motos_en, motos_fuera = resumen_estado(motos)
 
-st.metric("Total armas", int(resumen_armas["CANTIDAD"].sum()))
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button(f"🚓 Móviles En Servicio: {moviles_en}"):
+        st.session_state["pagina"] = "moviles"
+        st.experimental_rerun()
+    if c2.button(f"🚓 Móviles Fuera de Servicio: {moviles_fuera}"):
+        st.session_state["pagina"] = "moviles"
+        st.experimental_rerun()
+    if c3.button(f"🏍️ Motocicletas En Servicio: {motos_en}"):
+        st.session_state["pagina"] = "moviles"
+        st.experimental_rerun()
+    if c4.button(f"🏍️ Motocicletas Fuera de Servicio: {motos_fuera}"):
+        st.session_state["pagina"] = "moviles"
+        st.experimental_rerun()
 
-# ---------------------------------------------------------
-# RESUMEN RÁPIDO
-# ---------------------------------------------------------
-st.markdown("## 📊 Resumen rápido")
+# -------------------------------------------------
+# ALLANAMIENTOS Y ARMAS
+# -------------------------------------------------
+elif st.session_state["pagina"] == "allanamientos":
+    st.title("📊 Allanamientos y Armas")
+    allan_path = os.path.join(os.getcwd(), "allanas_armas.py")
+    if os.path.exists(allan_path):
+        with open(allan_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        exec_namespace = {}
+        try:
+            exec(code, exec_namespace)
+        except Exception as e:
+            st.error(f"Error ejecutando allanas_armas.py: {e}")
+    else:
+        st.error("No se encontró allanas_armas.py en la carpeta de la app.")
 
-col1, col2 = st.columns(2)
+# -------------------------------------------------
+# MÓVILES DSICCO
+# -------------------------------------------------
+elif st.session_state["pagina"] == "moviles":
+    st.title("🚓 Móviles DSICCO")
+    moviles_path = os.path.join(os.getcwd(), "moviles.py")
+    if os.path.exists(moviles_path):
+        with open(moviles_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        exec_namespace = {}
+        try:
+            exec(code, exec_namespace)
+        except Exception as e:
+            st.error(f"Error ejecutando moviles.py: {e}")
+    else:
+        st.error("No se encontró moviles.py en la carpeta de la app.")
 
-with col1:
-    st.markdown("**Armas por mes (ordenado):**")
-    total_armas_mes = (
-        resumen_armas.groupby(["MES", "MES_NOMBRE"], as_index=False)["CANTIDAD"]
-        .sum()
-        .sort_values("MES")
-    )
-    st.table(total_armas_mes[["MES_NOMBRE", "CANTIDAD"]])
 
-with col2:
-    st.markdown("**Armas por procedimiento:**")
-    st.table(
-        resumen_armas.groupby("INTERVENCION")["CANTIDAD"]
-        .sum()
-        .reset_index()
-    )
+# -------------------------------------------------
+# TALLER MECÁNICO
+# -------------------------------------------------
+elif st.session_state["pagina"] == "taller":
+    st.title("🛠️ Taller Mecánico – Gestión de Móviles")
+    taller_path = os.path.join(os.getcwd(), "TALLER_MOVILES.PY")
 
-# ---------------------------------------------------------
-# DESCARGA EXCEL
-# ---------------------------------------------------------
-excel_bytes = export_excel(blocks_allan, blocks_armas)
+    if os.path.exists(taller_path):
+        with open(taller_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        exec_namespace = {}
+        try:
+            exec(code, exec_namespace)
+        except Exception as e:
+            st.error(f"Error ejecutando taller_moviles.py: {e}")
+    else:
+        st.warning("No se encontró el archivo taller_moviles.py")
 
-st.download_button(
-    label="📥 Descargar Resúmenes en EXCEL",
-    data=excel_bytes,
-    file_name="Resumenes_DSICCO.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+# -------------------------------------------------
+# CONFIGURACIÓN
+# -------------------------------------------------
+elif st.session_state["pagina"] == "configuracion":
+    st.title("⚙️ Configuración")
+    st.info("Parámetros del sistema (sin subida de archivos).")
